@@ -17,14 +17,16 @@ const state = {
   dealerRevealIndex: -1,
   dealerRevealTimer: null,
   dealerRevealDelay: 350,
-  maxHands: 4
+  maxHands: 4,
+  minBet: 1
 };
 
 const elements = {
   bankroll: document.getElementById("bankroll"),
   bet: document.getElementById("bet"),
-  shoeCount: document.getElementById("shoe-count"),
   betInput: document.getElementById("bet-input"),
+  maxBetBtn: document.getElementById("max-bet-btn"),
+  clearBetBtn: document.getElementById("clear-bet-btn"),
   dealerCards: document.getElementById("dealer-cards"),
   dealerTotal: document.getElementById("dealer-total"),
   playerHands: document.getElementById("player-hands"),
@@ -137,13 +139,40 @@ function resetBankroll() {
 }
 
 function updateBet() {
-  const value = Number(elements.betInput.value);
-  state.bet = Number.isFinite(value) && value > 0 ? roundMoney(value) : 25;
+  // Don't rewrite the input while the player is actively typing/clearing it —
+  // that's what made it impossible to clear the box before. Just reflect a
+  // live preview in the "Current bet" stat; real validation happens on commit.
+  const raw = elements.betInput.value;
+  const value = Number(raw);
+  if (raw.trim() !== "" && Number.isFinite(value)) {
+    elements.bet.textContent = `$${formatMoney(value)}`;
+  }
+}
+
+function commitBet() {
+  const raw = Number(elements.betInput.value);
+  let value = Number.isFinite(raw) ? roundMoney(raw) : state.minBet;
+  value = Math.max(state.minBet, value);
+  if (state.bankroll > 0) {
+    value = Math.min(value, state.bankroll);
+  }
+  state.bet = value;
   elements.betInput.value = String(state.bet);
   render();
 }
 
+function handleMaxBet() {
+  elements.betInput.value = String(roundMoney(state.bankroll));
+  commitBet();
+}
+
+function handleClearBet() {
+  elements.betInput.value = "";
+  elements.betInput.focus();
+}
+
 function startRound() {
+  commitBet();
   const bet = roundMoney(Math.min(state.bet, state.bankroll));
   if (bet <= 0) {
     state.message = "You need a positive bankroll to play.";
@@ -461,8 +490,9 @@ function settleRound() {
 function render() {
   elements.bankroll.textContent = `$${formatMoney(state.bankroll)}`;
   elements.bet.textContent = `$${formatMoney(state.bet)}`;
-  elements.shoeCount.textContent = String(state.shoe.length);
-  elements.betInput.value = String(state.bet);
+  if (document.activeElement !== elements.betInput) {
+    elements.betInput.value = String(state.bet);
+  }
   renderDealer();
   renderPlayerHands();
   renderControls();
@@ -555,6 +585,9 @@ function bindEvents() {
   elements.insuranceBtn.addEventListener("click", () => handleInsurance(true));
   elements.declineInsuranceBtn.addEventListener("click", () => handleInsurance(false));
   elements.betInput.addEventListener("input", updateBet);
+  elements.betInput.addEventListener("blur", commitBet);
+  elements.maxBetBtn.addEventListener("click", handleMaxBet);
+  elements.clearBetBtn.addEventListener("click", handleClearBet);
 }
 
 function init() {
