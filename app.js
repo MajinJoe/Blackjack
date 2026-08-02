@@ -388,7 +388,28 @@ function advanceHand() {
     }
     nextIndex += 1;
   }
+
+  const anyLiveHand = state.playerHands.some((hand) => hand.status !== "bust");
+  if (!anyLiveHand) {
+    settleAllBusted();
+    return;
+  }
+
   resolveDealerTurn();
+}
+
+function settleAllBusted() {
+  if (state.dealerRevealTimer) {
+    window.clearTimeout(state.dealerRevealTimer);
+    state.dealerRevealTimer = null;
+  }
+  state.message = state.playerHands.length > 1 ? "All hands bust. Round over." : "Bust. Round over.";
+  state.roundActive = false;
+  state.dealerTurn = false;
+  state.dealerRevealed = true;
+  state.dealerRevealPending = false;
+  state.dealerRevealIndex = -1;
+  render();
 }
 
 function resolveDealerTurn() {
