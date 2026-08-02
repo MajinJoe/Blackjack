@@ -16,7 +16,8 @@ const state = {
   dealerRevealPending: false,
   dealerRevealIndex: -1,
   dealerRevealTimer: null,
-  dealerRevealDelay: 350
+  dealerRevealDelay: 350,
+  maxHands: 4
 };
 
 const elements = {
@@ -39,6 +40,14 @@ const elements = {
   insuranceBtn: document.getElementById("insurance-btn"),
   declineInsuranceBtn: document.getElementById("decline-insurance-btn")
 };
+
+function roundMoney(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function formatMoney(value) {
+  return roundMoney(value).toFixed(2);
+}
 
 function buildShoe() {
   const shoe = [];
@@ -129,13 +138,13 @@ function resetBankroll() {
 
 function updateBet() {
   const value = Number(elements.betInput.value);
-  state.bet = Number.isFinite(value) && value > 0 ? value : 25;
+  state.bet = Number.isFinite(value) && value > 0 ? roundMoney(value) : 25;
   elements.betInput.value = String(state.bet);
   render();
 }
 
 function startRound() {
-  const bet = Math.min(state.bet, state.bankroll);
+  const bet = roundMoney(Math.min(state.bet, state.bankroll));
   if (bet <= 0) {
     state.message = "You need a positive bankroll to play.";
     render();
@@ -143,7 +152,7 @@ function startRound() {
   }
 
   resetRound();
-  state.bankroll -= bet;
+  state.bankroll = roundMoney(state.bankroll - bet);
   state.playerHands.push({
     cards: [drawCard(), drawCard()],
     bet,
@@ -160,7 +169,7 @@ function startRound() {
   const dealerBlackjack = isBlackjack(state.dealerCards);
 
   if (playerBlackjack && dealerBlackjack) {
-    state.bankroll += state.playerHands[0].bet;
+    state.bankroll = roundMoney(state.bankroll + state.playerHands[0].bet);
     state.message = "Push — both hands have blackjack.";
     state.roundActive = false;
     state.dealerRevealed = true;
@@ -169,7 +178,7 @@ function startRound() {
   }
 
   if (playerBlackjack) {
-    state.bankroll += state.playerHands[0].bet * 2.5;
+    state.bankroll = roundMoney(state.bankroll + state.playerHands[0].bet * 2.5);
     state.message = "Blackjack! You win 3:2.";
     state.roundActive = false;
     state.dealerRevealed = true;
@@ -201,14 +210,14 @@ function handleInsurance(accepted) {
   if (!state.insuranceOffered) return;
 
   const hand = state.playerHands[0];
-  const insuranceBet = hand.baseBet / 2;
+  const insuranceBet = roundMoney(hand.baseBet / 2);
   if (accepted) {
     if (state.bankroll < insuranceBet) {
       state.message = "Not enough bankroll for insurance.";
       render();
       return;
     }
-    state.bankroll -= insuranceBet;
+    state.bankroll = roundMoney(state.bankroll - insuranceBet);
     hand.insuranceBet = insuranceBet;
   }
 
@@ -216,7 +225,7 @@ function handleInsurance(accepted) {
   const dealerBlackjack = isBlackjack(state.dealerCards);
   if (dealerBlackjack) {
     if (hand.insuranceBet > 0) {
-      state.bankroll += hand.insuranceBet * 2;
+      state.bankroll = roundMoney(state.bankroll + hand.insuranceBet * 2);
     }
     state.message = hand.insuranceBet > 0 ? "Dealer has blackjack. Insurance pays 2:1." : "Dealer has blackjack. You lose the hand.";
     state.roundActive = false;
@@ -239,8 +248,8 @@ function handleHit() {
   const total = getHandValue(hand.cards);
   if (total > 21) {
     hand.status = "bust";
-    state.message = "Bust! Round over.";
-    endPlayerTurn();
+    state.message = "Bust!";
+    advanceHand();
     return;
   }
 
@@ -275,32 +284,34 @@ function handleDouble() {
     return;
   }
 
-  state.bankroll -= hand.baseBet;
-  hand.bet += hand.baseBet;
+  state.bankroll = roundMoney(state.bankroll - hand.baseBet);
+  hand.bet = roundMoney(hand.bet + hand.baseBet);
   hand.doubled = true;
   hand.cards.push(drawCard());
   const total = getHandValue(hand.cards);
   hand.status = total > 21 ? "bust" : "stand";
   state.message = total > 21 ? "Double down busts the hand." : "Double down complete.";
-  if (total > 21) {
-    endPlayerTurn();
-  } else {
-    advanceHand();
-  }
+  advanceHand();
 }
 
 function handleSplit() {
   if (!state.roundActive || state.dealerTurn || state.insuranceOffered) return;
   const hand = state.playerHands[state.activeHandIndex];
   if (!hand || hand.status !== "playing" || !isPair(hand.cards) || hand.split) return;
+  if (state.playerHands.length >= state.maxHands) {
+    state.message = `You can split up to ${state.maxHands - 1} times.`;
+    render();
+    return;
+  }
   if (state.bankroll < hand.baseBet) {
     state.message = "Not enough bankroll to split.";
     render();
     return;
   }
 
-  state.bankroll -= hand.baseBet;
+  state.bankroll = roundMoney(state.bankroll - hand.baseBet);
   const [firstCard, secondCard] = hand.cards;
+  const isAcesSplit = firstCard.rank === "A";
   const leftHand = {
     cards: [firstCard],
     bet: hand.baseBet,
@@ -324,6 +335,15 @@ function handleSplit() {
   leftHand.cards.push(drawCard());
   rightHand.cards.push(drawCard());
   state.activeHandIndex = 0;
+
+  if (isAcesSplit) {
+    leftHand.status = "stand";
+    rightHand.status = "stand";
+    state.message = "Split aces — one card each, no further hitting.";
+    advanceHand();
+    return;
+  }
+
   state.message = "Split complete. Play each hand.";
   render();
 }
@@ -340,14 +360,6 @@ function advanceHand() {
     nextIndex += 1;
   }
   resolveDealerTurn();
-}
-
-function endPlayerTurn() {
-  state.dealerRevealed = true;
-  state.roundActive = false;
-  state.dealerTurn = false;
-  state.message = "Bust! Round over.";
-  render();
 }
 
 function resolveDealerTurn() {
@@ -416,7 +428,7 @@ function settleRound() {
   if (dealerTotal > 21) {
     for (const hand of state.playerHands) {
       if (hand.status !== "bust") {
-        state.bankroll += hand.bet * 2;
+        state.bankroll = roundMoney(state.bankroll + hand.bet * 2);
       }
     }
     state.message = `Dealer busts. All non-busted hands win 1:1.`;
@@ -428,11 +440,11 @@ function settleRound() {
 
       const handValue = getHandValue(hand.cards);
       if (handValue > dealerTotal) {
-        state.bankroll += hand.bet * 2;
+        state.bankroll = roundMoney(state.bankroll + hand.bet * 2);
       } else if (handValue < dealerTotal) {
         // Loss; no payout.
       } else {
-        state.bankroll += hand.bet;
+        state.bankroll = roundMoney(state.bankroll + hand.bet);
       }
     }
     state.message = `Dealer stands on ${dealerTotal}. Round settled.`;
@@ -447,8 +459,8 @@ function settleRound() {
 }
 
 function render() {
-  elements.bankroll.textContent = `$${state.bankroll}`;
-  elements.bet.textContent = `$${state.bet}`;
+  elements.bankroll.textContent = `$${formatMoney(state.bankroll)}`;
+  elements.bet.textContent = `$${formatMoney(state.bet)}`;
   elements.shoeCount.textContent = String(state.shoe.length);
   elements.betInput.value = String(state.bet);
   renderDealer();
@@ -502,7 +514,7 @@ function renderPlayerHands() {
           </div>
           <div class="card-row">${cardsMarkup}</div>
           <div class="hand-total">
-            Total: ${handValue} • Bet: $${hand.bet} • Insurance: $${hand.insuranceBet}
+            Total: ${handValue} • Bet: $${formatMoney(hand.bet)} • Insurance: $${formatMoney(hand.insuranceBet)}
           </div>
         </article>
       `;
